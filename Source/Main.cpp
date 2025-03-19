@@ -5,6 +5,8 @@
 #include <SFML/Graphics.hpp>
 #include <SFML/Window.hpp>
 #include <SFML/System.hpp>
+#include <imgui.h>
+#include <imgui-SFML.h>
 
 ///////////////////////////////////////////////////////////////////////////////
 int main(int argc, char* argv[])
@@ -20,7 +22,13 @@ int main(int argc, char* argv[])
     sf::Vector2i lastPosition;
 
     sf::RenderWindow window(sf::VideoMode({800, 600}), "Moon", sf::Style::Default);
+    sf::Clock clock;
     window.setFramerateLimit(60);
+
+    if (!ImGui::SFML::Init(window)) {
+        std::cerr << "Coudl'nt initialize ImGui" << std::endl;
+        return (EXIT_FAILURE);
+    }
 
     player.Play();
 
@@ -28,6 +36,8 @@ int main(int argc, char* argv[])
 
     while (window.isOpen()) {
         while (auto event = window.pollEvent()) {
+            ImGui::SFML::ProcessEvent(window, *event);
+
             if (event->is<sf::Event::Closed>()) {
                 window.close();
             } else if (auto size = event->getIf<sf::Event::Resized>()) {
@@ -60,17 +70,30 @@ int main(int argc, char* argv[])
             }
         }
 
+        ImGui::SFML::Update(window, clock.restart());
+
         if (!isFullscreen) {
             lastPosition = window.getPosition();
         }
-
         player.Update();
 
+        ImGui::Begin("Controls");
+        if (ImGui::Button("Play/Pause")) {
+            player.TogglePause();
+        }
+        ImGui::Text("%.0f/%.0f", player.GetCurrentTime(), player.GetDuration());
+        ImGui::End();
+
         window.clear(sf::Color::Black);
+
         sprite.setTexture(player.GetCurrentFrameTexture());
         window.draw(sprite);
+        ImGui::SFML::Render(window);
+
         window.display();
     }
+
+    ImGui::SFML::Shutdown();
 
     return (0);
 }

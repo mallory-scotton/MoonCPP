@@ -7,6 +7,7 @@ CC					=	gcc
 
 CXXFLAGS			=	-std=c++20 -Wall -Wextra \
 						-IExternal \
+						-IExternal/ImGui \
 						-IExternal/SFML/include \
 						-ISource \
 						-DSFML_STATIC \
@@ -52,8 +53,10 @@ HASH				=
 ###############################################################################
 
 SOURCE_DIRECTORY	=	Source
+IMGUI_DIRECTORY		=	External/ImGui
 
-SOURCES				=	$(shell find $(SOURCE_DIRECTORY) -name '*.cpp')
+SOURCES				=	$(shell find $(SOURCE_DIRECTORY) -name '*.cpp') \
+						$(shell find $(IMGUI_DIRECTORY) -name '*.cpp')
 
 ###############################################################################
 ## Makefile logic
