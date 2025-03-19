@@ -189,38 +189,10 @@ void VideoPlayer::Initialize(void)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// void VideoPlayer::DecodeFrame(void)
-// {
-//     AVPacket packet;
-//     bool frameDecoded = false;
-
-//     while (!frameDecoded && av_read_frame(mFormatContext, &packet) >= 0) {
-//         if (packet.stream_index == mVideoStreamIndex) {
-//             int ret = avcodec_send_packet(mCodecContext, &packet);
-//             if (ret == 0) {
-//                 ret = avcodec_receive_frame(mCodecContext, mFrame);
-//                 if (ret == 0) {
-//                     sws_scale(
-//                         mSwsContext, mFrame->data, mFrame->linesize, 0,
-//                         mCodecContext->height, mFrameRGB->data,
-//                         mFrameRGB->linesize
-//                     );
-//                     frameDecoded = true;
-//                 }
-//             }
-//         }
-//         av_packet_unref(&packet);
-//     }
-
-//     if (!frameDecoded) {
-//         // TODO: Handle end of stream
-//         // You could add logic here to loop the video, pause, etc.
-//     }
-// }
-
 void VideoPlayer::DecodeFrame(void)
 {
-    AVRational timeBase = mFormatContext->streams[mVideoStreamIndex]->time_base;
+    AVRational timeBase =
+        mFormatContext->streams[mVideoStreamIndex]->time_base;
     Int64 lastPts = 0;
 
     while (!mStopDecoding) {
