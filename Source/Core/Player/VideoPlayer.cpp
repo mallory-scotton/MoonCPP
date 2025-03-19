@@ -35,6 +35,7 @@ VideoPlayer::VideoPlayer(const Path& filePath)
     , mTexture({1U, 1U})
     , mVideoStreamIndex(-1)
     , mIsPlaying(false)
+    , mPlaybackSpeed(1.0)
 {
     Initialize();
 }
@@ -227,6 +228,18 @@ double VideoPlayer::GetCurrentTime(void) const
         return (av_q2d(mFormatContext->streams[mVideoStreamIndex]->time_base) * mFrame->pts);
     }
     return (0.0);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+void VideoPlayer::SetPlaybackSpeed(double speed)
+{
+    mPlaybackSpeed = std::max(0.25, std::min(speed, 4.0));
+}
+
+///////////////////////////////////////////////////////////////////////////////
+double VideoPlayer::GetPlaybackSpeed(void) const
+{
+    return (mPlaybackSpeed);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
