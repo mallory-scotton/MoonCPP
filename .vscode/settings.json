@@ -3,6 +3,12 @@
     "**/*.o": true,
     "**/*.d": true
   },
+  "C_Cpp.default.includePath": [
+    "${workspaceFolder}/**",
+    "${workspaceFolder}/External/SFML/include",
+    "${workspaceFolder}/External/ImGui",
+    "/usr/include"
+  ],
   "files.associations": {
     "array": "cpp",
     "atomic": "cpp",

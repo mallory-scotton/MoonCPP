@@ -50,12 +50,12 @@ Temporary/
 Build/
 
 # Ignore the video tests file
-*.mkv
-*.mp4
-*.avi
-*.mov
-*.flv
-*.mp3
-*.wav
-*.ogg
-*.flac
+/*.mkv
+/*.mp4
+/*.avi
+/*.mov
+/*.flv
+/*.mp3
+/*.wav
+/*.ogg
+/*.flac

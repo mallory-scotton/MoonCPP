@@ -161,7 +161,6 @@ void VideoPlayer::DecodeFrame(void)
 {
     AVPacket packet;
     bool frameDecoded = false;
-    Int64 lastPts = 0;
 
     while (!frameDecoded && av_read_frame(mFormatContext, &packet) >= 0) {
         if (packet.stream_index == mVideoStreamIndex) {

@@ -1,38 +1,198 @@
-# Compiler
-CXX = g++
+###############################################################################
+## Configuration
+###############################################################################
 
-# Compiler flags
-CXXFLAGS = -std=c++17 -ISource
+CXX					=	g++
+CC					=	gcc
 
-# Linker flags
-LDFLAGS = -lavformat -lavcodec -lavutil -lsfml-graphics -lsfml-window -lsfml-system -lswscale -lswresample -lz -lm -lpthread
+CXXFLAGS			=	-std=c++20 -Wall -Wextra \
+						-IExternal \
+						-IExternal/SFML/include \
+						-ISource \
+						-DSFML_STATIC \
+						-LExternal/SFML/build/lib \
+						-lsfml-audio-s \
+						-lsfml-graphics-s \
+						-lsfml-window-s \
+						-lsfml-system-s \
+						-lGL \
+						-lz \
+						-lm \
+						-lX11 \
+						-lXrandr \
+						-lXcursor \
+						-lXinerama \
+						-ludev \
+						-lXi \
+						-lfreetype \
+						-lFLAC \
+						-logg \
+						-lvorbis \
+						-lvorbisfile \
+						-lvorbisenc \
+						-lavformat \
+						-lavcodec \
+						-lavutil \
+						-lswscale \
+						-lswresample \
+						-lpthread
 
-# Source directory
-SRC_DIR = Source
+TARGET				=	moon
 
-# Automatically find all .cpp files in the source directory and its subdirectories
-SOURCES = $(shell find $(SRC_DIR) -type f -iname "*.cpp")
+###############################################################################
+## Metadata
+###############################################################################
 
-# Object files
-OBJECTS = $(SOURCES:.cpp=.o)
+AUTHOR				=	mallory-scotton
+DATE				=	
+HASH				=	
 
-# Executable name
-TARGET = moon
+###############################################################################
+## Sources
+###############################################################################
 
-# Default target
-all: $(TARGET)
+SOURCE_DIRECTORY	=	Source
 
-# Link the executable
-$(TARGET): $(OBJECTS)
-	$(CXX) -o $@ $^ $(LDFLAGS)
+SOURCES				=	$(shell find $(SOURCE_DIRECTORY) -name '*.cpp')
 
-# Compile source files to object files
+###############################################################################
+## Makefile logic
+###############################################################################
+
+ifeq ($(shell git rev-parse HEAD > /dev/null; echo $$?),0)
+	AUTHOR			:=	$(shell git log --format='%aN' | sort -u | awk \
+						'{printf "%s, ", $$0}' | rev | cut -c 3- | rev)
+	DATE			:=	$(shell git log -1 --date=format:"%Y/%m/%d %T" \
+						--format="%ad")
+	HASH			:=	$(shell git rev-parse --short HEAD)
+endif
+
+MFLAGS				:=	$(CXXFLAGS)
+
+COM_COLOR			=	\033[0;34m
+OBJ_COLOR			=	\033[0;36m
+OK_COLOR			=	\033[0;32m
+ERROR_COLOR			=	\033[0;31m
+WARN_COLOR			=	\033[0;33m
+NO_COLOR			=	\033[m
+
+OBJECTS				:=	$(SOURCES:.cpp=.o) $(SOURCES_C:.c=.o)
+
+DEPENDENCIES		=	$(SOURCES:.cpp=.d) $(SOURCES_C:.c=.d)
+
+QUIET				?=	0
+
+SFML_COMPILATION	:=	cd External/SFML && \
+						cmake -S . -B build -DBUILD_SHARED_LIBS=OFF \
+						> /dev/null && cmake --build build > /dev/null
+
+###############################################################################
+## Makefile rules
+###############################################################################
+
+all:
+	@make QUIET=0 -s build
+
+deps:
+	@echo "Installing dependencies..."
+	@set -e; \
+	if command -v apt > /dev/null; then \
+		echo "Detected apt-based system"; \
+		sudo apt update && sudo apt install -y \
+			libflac-dev \
+			libvorbis-dev \
+			libfreetype6-dev \
+			libudev-dev \
+			libgl1-mesa-dev \
+			libx11-dev \
+			libxrandr-dev \
+			libxcursor-dev \
+			libxinerama-dev \
+			libxi-dev \
+			zlib1g-dev \
+			libogg-dev \
+			libvorbisfile3 \
+			libvorbisenc2; \
+	elif command -v dnf > /dev/null; then \
+		echo "Detected dnf-based system"; \
+		sudo dnf check-update || true; \
+		sudo dnf install -y \
+			flac-devel \
+			libvorbis-devel \
+			freetype-devel \
+			libudev-devel \
+			mesa-libGL-devel \
+			libX11-devel \
+			libXrandr-devel \
+			libXcursor-devel \
+			libXinerama-devel \
+			libXi-devel \
+			zlib-devel \
+			libogg-devel \
+			libvorbisfile-devel \
+			libvorbisenc-devel; \
+	else \
+		echo "No supported package manager found."; \
+		exit 1; \
+	fi
+
+-include $(DEPENDENCIES)
+
+external:
+	@./Scripts/run.sh "$(SFML_COMPILATION)" "SFML-3.0.0"
+
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	@./Scripts/progress.sh
+	@./Scripts/run.sh "$(CXX) -c $< -o $@ $(CXXFLAGS)" "$@"
 
-# Clean up build files
+%.o: %.c
+	@./Scripts/progress.sh
+	@./Scripts/run.sh "$(CC) -c $< -o $@ $(CCFLAGS)" "$@"
+
+clear:
+	@rm -f Source/Main.o
+
+header:
+	@printf "%b" "$(OK_COLOR)"
+ifeq ($(QUIET),0)
+	@cat .art
+endif
+	@echo
+ifneq ($(HASH),)
+	@printf "%b" "$(OBJ_COLOR)Name:	$(WARN_COLOR)$(TARGET)@$(HASH)\n"
+else
+	@printf "%b" "$(OBJ_COLOR)Name:	$(WARN_COLOR)$(TARGET)\n"
+endif
+	@printf "%b" "$(OBJ_COLOR)Author:	$(WARN_COLOR)$(AUTHOR)\n"
+	@printf "%b" "$(OBJ_COLOR)Date: 	$(WARN_COLOR)$(DATE)\n\033[m"
+	@printf "%b" "$(OBJ_COLOR)CC: 	$(WARN_COLOR)$(CXX)\n\033[m"
+	@printf "%b" "$(OBJ_COLOR)Flags: 	$(WARN_COLOR)$(MFLAGS)\n\033[m"
+	@echo
+
+setup: header external
+	@./Scripts/setup.sh "$(SOURCES)" "$(EXTENSION)"
+
+build: CXXFLAGS += -MMD -MF $(@:.o=.d)
+build: setup clear $(OBJECTS)
+	@./Scripts/run.sh "$(CXX) -o $(TARGET) $(OBJECTS) $(CXXFLAGS)" "$@"
+	@rm -f .build
+
+debug: CXXFLAGS += -g3
+debug: build
+
 clean:
-	rm -f $(OBJECTS) $(TARGET)
+	@find $(SOURCE_DIRECTORY) -type f -iname "*.o" -delete
+	@find $(IMGUI_DIRECTORY) -type f -iname "*.o" -delete
+	@find $(SOURCE_DIRECTORY) -type f -iname "*.d" -delete
+	@find $(IMGUI_DIRECTORY) -type f -iname "*.d" -delete
+	@find . -type f -iname "*.gcda" -delete
+	@find . -type f -iname "*.gcno" -delete
+	@find . -type f -iname "*.html" -delete
+	@find . -type f -iname "*.css" -delete
 
-# Phony targets
-.PHONY: all clean
+fclean: clean
+	@rm -f $(TARGET)
+
+re: fclean build
+
+.PHONY: all build debug clean fclean re
