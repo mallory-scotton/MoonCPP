@@ -30,6 +30,7 @@ VideoPlayer::VideoPlayer(const Path& filePath)
     , mCodecContext(nullptr)
     , mFrame(nullptr)
     , mFrameRGB(nullptr)
+    , mPacket(nullptr)
     , mSwsContext(nullptr)
     , mBuffer(nullptr)
     , mTexture({1U, 1U})
@@ -43,6 +44,12 @@ VideoPlayer::VideoPlayer(const Path& filePath)
 ///////////////////////////////////////////////////////////////////////////////
 VideoPlayer::~VideoPlayer()
 {
+    mStopDecoding = true;
+
+    if (mDecodeThread.joinable()) {
+        mDecodeThread.join();
+    }
+
     if (mBuffer) {
         av_free(mBuffer);
         mBuffer = nullptr;
@@ -54,6 +61,10 @@ VideoPlayer::~VideoPlayer()
 
     if (mFrame) {
         av_frame_free(&mFrame);
+    }
+
+    if (mPacket) {
+        av_packet_free(&mPacket);
     }
 
     if (mSwsContext) {
@@ -136,6 +147,12 @@ void VideoPlayer::Initialize(void)
         return;
     }
 
+    mPacket = av_packet_alloc();
+    if (!mPacket) {
+        std::cerr << "Could not allocate packet" << std::endl;
+        return;
+    }
+
     int numBytes = av_image_get_buffer_size(
         AV_PIX_FMT_RGBA, mCodecContext->width, mCodecContext->height, 1);
     mBuffer = (Uint8*)av_malloc(numBytes);
@@ -167,35 +184,92 @@ void VideoPlayer::Initialize(void)
     })) {
         std::cerr << "Could not resize SFML texture" << std::endl;
     }
+
+    mDecodeThread = Thread(&VideoPlayer::DecodeFrame, this);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// void VideoPlayer::DecodeFrame(void)
+// {
+//     AVPacket packet;
+//     bool frameDecoded = false;
+
+//     while (!frameDecoded && av_read_frame(mFormatContext, &packet) >= 0) {
+//         if (packet.stream_index == mVideoStreamIndex) {
+//             int ret = avcodec_send_packet(mCodecContext, &packet);
+//             if (ret == 0) {
+//                 ret = avcodec_receive_frame(mCodecContext, mFrame);
+//                 if (ret == 0) {
+//                     sws_scale(
+//                         mSwsContext, mFrame->data, mFrame->linesize, 0,
+//                         mCodecContext->height, mFrameRGB->data,
+//                         mFrameRGB->linesize
+//                     );
+//                     frameDecoded = true;
+//                 }
+//             }
+//         }
+//         av_packet_unref(&packet);
+//     }
+
+//     if (!frameDecoded) {
+//         // TODO: Handle end of stream
+//         // You could add logic here to loop the video, pause, etc.
+//     }
+// }
+
 void VideoPlayer::DecodeFrame(void)
 {
-    AVPacket packet;
-    bool frameDecoded = false;
+    AVRational timeBase = mFormatContext->streams[mVideoStreamIndex]->time_base;
+    Int64 lastPts = 0;
 
-    while (!frameDecoded && av_read_frame(mFormatContext, &packet) >= 0) {
-        if (packet.stream_index == mVideoStreamIndex) {
-            int ret = avcodec_send_packet(mCodecContext, &packet);
-            if (ret == 0) {
-                ret = avcodec_receive_frame(mCodecContext, mFrame);
-                if (ret == 0) {
-                    sws_scale(
-                        mSwsContext, mFrame->data, mFrame->linesize, 0,
-                        mCodecContext->height, mFrameRGB->data,
-                        mFrameRGB->linesize
-                    );
-                    frameDecoded = true;
-                }
+    while (!mStopDecoding) {
+        if (av_read_frame(mFormatContext, mPacket) < 0) {
+            mStopDecoding = true;
+            break;
+        }
+
+        if (mPacket->stream_index != mVideoStreamIndex) {
+            av_packet_unref(mPacket);
+            continue;
+        }
+
+        if (avcodec_send_packet(mCodecContext, mPacket) < 0) {
+            av_packet_unref(mPacket);
+            continue;
+        }
+
+        int ret = avcodec_receive_frame(mCodecContext, mFrame);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF || ret < 0) {
+            av_packet_unref(mPacket);
+            continue;
+        }
+
+        Int64 pts = mFrame->pts;
+        if (pts != AV_NOPTS_VALUE && lastPts != AV_NOPTS_VALUE) {
+            Int64 delay = pts - lastPts;
+            if (delay > 0) {
+                int ms = (delay * timeBase.num * 1000) / timeBase.den;
+                std::this_thread::sleep_for(std::chrono::milliseconds(ms));
             }
         }
-        av_packet_unref(&packet);
-    }
+        lastPts = pts;
 
-    if (!frameDecoded) {
-        // TODO: Handle end of stream
-        // You could add logic here to loop the video, pause, etc.
+        {
+            std::unique_lock<std::mutex> lock(mFrameMutex);
+            sws_scale(
+                mSwsContext, mFrame->data, mFrame->linesize, 0,
+                mCodecContext->height, mFrameRGB->data, mFrameRGB->linesize
+            );
+
+            mNewFrameReady = true;
+
+            mFrameCV.wait(lock, [this]{
+                return (!mNewFrameReady || mStopDecoding);
+            });
+        }
+
+        av_packet_unref(mPacket);
     }
 }
 
@@ -209,6 +283,13 @@ void VideoPlayer::Play(void)
 void VideoPlayer::Pause(void)
 {
     mIsPlaying = false;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+void VideoPlayer::Stop(void)
+{
+    mIsPlaying = false;
+    mStopDecoding = true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -266,17 +347,14 @@ double VideoPlayer::GetPlaybackSpeed(void) const
 ///////////////////////////////////////////////////////////////////////////////
 void VideoPlayer::Update(void)
 {
-    bool newFrameDecoded = false;
-    if (mIsPlaying) {
-        Int64 previousPts = mFrame ? mFrame->pts : AV_NOPTS_VALUE;
-        DecodeFrame();
-        newFrameDecoded = mFrame && (mFrame->pts != previousPts);
-    }
-    if (mFrameRGB && mBuffer && (newFrameDecoded || !mIsPlaying)) {
+    if (mNewFrameReady) {
+        std::unique_lock<Mutex> lock(mFrameMutex);
         mTexture.update(mBuffer, {
             static_cast<Uint32>(mCodecContext->width),
             static_cast<Uint32>(mCodecContext->height)
         }, {0U, 0U});
+        mNewFrameReady = false;
+        mFrameCV.notify_one();
     }
 }
 

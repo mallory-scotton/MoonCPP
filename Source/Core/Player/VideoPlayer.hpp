@@ -36,12 +36,19 @@ private:
     AVCodecContext* mCodecContext;
     AVFrame* mFrame;
     AVFrame* mFrameRGB;
+    AVPacket* mPacket;
     struct SwsContext* mSwsContext;
     Uint8* mBuffer;
     mutable sf::Texture mTexture;
     int mVideoStreamIndex;
     bool mIsPlaying;
     double mPlaybackSpeed;
+
+    Thread mDecodeThread;
+    Mutex mFrameMutex;
+    ConditionVariable mFrameCV;
+    Atomic<bool> mStopDecoding{false};
+    Atomic<bool> mNewFrameReady{false};
 
 public:
     ///////////////////////////////////////////////////////////////////////////
@@ -83,6 +90,12 @@ public:
     ///
     ///////////////////////////////////////////////////////////////////////////
     void Pause(void);
+
+    ///////////////////////////////////////////////////////////////////////////
+    /// \brief
+    ///
+    ///////////////////////////////////////////////////////////////////////////
+    void Stop(void);
 
     ///////////////////////////////////////////////////////////////////////////
     /// \brief

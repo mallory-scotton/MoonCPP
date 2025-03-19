@@ -40,6 +40,7 @@ int main(int argc, char* argv[])
 
             if (event->is<sf::Event::Closed>()) {
                 window.close();
+                player.Stop();
             } else if (auto size = event->getIf<sf::Event::Resized>()) {
                 window.setView(sf::View(sf::FloatRect(
                     {0.f, 0.f},
