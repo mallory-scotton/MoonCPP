@@ -73,7 +73,9 @@ VideoPlayer::~VideoPlayer()
 ///////////////////////////////////////////////////////////////////////////////
 void VideoPlayer::Initialize(void)
 {
-    if (avformat_open_input(&mFormatContext, mMedia->filePath.c_str(), nullptr, nullptr) != 0) {
+    if (avformat_open_input(
+        &mFormatContext, mMedia->filePath.c_str(), nullptr, nullptr) != 0
+    ) {
         std::cerr << "Could not open input file: " << mMedia->filePath << std::endl;
         return;
     }
@@ -85,7 +87,8 @@ void VideoPlayer::Initialize(void)
     }
 
     for (unsigned int i = 0; i < mFormatContext->nb_streams; i++) {
-        if (mFormatContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+        AVStream *stream = mFormatContext->streams[i];
+        if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             mVideoStreamIndex = i;
             break;
         }
@@ -97,7 +100,8 @@ void VideoPlayer::Initialize(void)
         return;
     }
 
-    AVCodecParameters* codecParams = mFormatContext->streams[mVideoStreamIndex]->codecpar;
+    AVCodecParameters* codecParams =
+        mFormatContext->streams[mVideoStreamIndex]->codecpar;
     const AVCodec* codec = avcodec_find_decoder(codecParams->codec_id);
 
     if (!codec) {
@@ -132,7 +136,8 @@ void VideoPlayer::Initialize(void)
         return;
     }
 
-    int numBytes = av_image_get_buffer_size(AV_PIX_FMT_RGBA, mCodecContext->width, mCodecContext->height, 1);
+    int numBytes = av_image_get_buffer_size(
+        AV_PIX_FMT_RGBA, mCodecContext->width, mCodecContext->height, 1);
     mBuffer = (Uint8*)av_malloc(numBytes);
 
     if (!mBuffer) {
@@ -140,9 +145,16 @@ void VideoPlayer::Initialize(void)
         return;
     }
 
-    av_image_fill_arrays(mFrameRGB->data, mFrameRGB->linesize, mBuffer, AV_PIX_FMT_RGBA, mCodecContext->width, mCodecContext->height, 1);
+    av_image_fill_arrays(
+        mFrameRGB->data, mFrameRGB->linesize, mBuffer, AV_PIX_FMT_RGBA,
+        mCodecContext->width, mCodecContext->height, 1
+    );
 
-    mSwsContext = sws_getContext(mCodecContext->width, mCodecContext->height, mCodecContext->pix_fmt, mCodecContext->width, mCodecContext->height, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
+    mSwsContext = sws_getContext(
+        mCodecContext->width, mCodecContext->height, mCodecContext->pix_fmt,
+        mCodecContext->width, mCodecContext->height, AV_PIX_FMT_RGBA,
+        SWS_BILINEAR, nullptr, nullptr, nullptr
+    );
 
     if (!mSwsContext) {
         std::cerr << "Could not initialize SWS context" << std::endl;
@@ -169,7 +181,11 @@ void VideoPlayer::DecodeFrame(void)
             if (ret == 0) {
                 ret = avcodec_receive_frame(mCodecContext, mFrame);
                 if (ret == 0) {
-                    sws_scale(mSwsContext, mFrame->data, mFrame->linesize, 0, mCodecContext->height, mFrameRGB->data, mFrameRGB->linesize);
+                    sws_scale(
+                        mSwsContext, mFrame->data, mFrame->linesize, 0,
+                        mCodecContext->height, mFrameRGB->data,
+                        mFrameRGB->linesize
+                    );
                     frameDecoded = true;
                 }
             }
@@ -205,7 +221,9 @@ void VideoPlayer::TogglePause(void)
 void VideoPlayer::Seek(double seconds)
 {
     Int64 timestamp = static_cast<Int64>(seconds * AV_TIME_BASE);
-    if (av_seek_frame(mFormatContext, mVideoStreamIndex, timestamp, AVSEEK_FLAG_BACKWARD) < 0) {
+    if (av_seek_frame(mFormatContext,
+        mVideoStreamIndex, timestamp, AVSEEK_FLAG_BACKWARD) < 0
+    ) {
         std::cerr << "Could not seek to timestamp: " << seconds << std::endl;
         return;
     }
@@ -225,7 +243,10 @@ double VideoPlayer::GetDuration(void) const
 double VideoPlayer::GetCurrentTime(void) const
 {
     if (mFrame && mFrame->pts != AV_NOPTS_VALUE) {
-        return (av_q2d(mFormatContext->streams[mVideoStreamIndex]->time_base) * mFrame->pts);
+        return (
+            av_q2d(mFormatContext->streams[mVideoStreamIndex]->time_base) *
+            mFrame->pts
+        );
     }
     return (0.0);
 }
