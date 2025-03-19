@@ -195,11 +195,17 @@ void VideoPlayer::Pause(void)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+void VideoPlayer::TogglePause(void)
+{
+    mIsPlaying = !mIsPlaying;
+}
+
+///////////////////////////////////////////////////////////////////////////////
 void VideoPlayer::Seek(double seconds)
 {
     Int64 timestamp = static_cast<Int64>(seconds * AV_TIME_BASE);
     if (av_seek_frame(mFormatContext, mVideoStreamIndex, timestamp, AVSEEK_FLAG_BACKWARD) < 0) {
-        // TODO: Handle error
+        std::cerr << "Could not seek to timestamp: " << seconds << std::endl;
         return;
     }
     avcodec_flush_buffers(mCodecContext);

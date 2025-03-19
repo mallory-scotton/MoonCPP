@@ -16,6 +16,9 @@ int main(int argc, char* argv[])
 
     Moon::VideoPlayer player(argv[1]);
 
+    bool isFullscreen = false;
+    sf::Vector2i lastPosition;
+
     sf::RenderWindow window(sf::VideoMode({800, 600}), "Moon", sf::Style::Default);
     window.setFramerateLimit(60);
 
@@ -27,8 +30,7 @@ int main(int argc, char* argv[])
         while (auto event = window.pollEvent()) {
             if (event->is<sf::Event::Closed>()) {
                 window.close();
-            }
-            if (auto size = event->getIf<sf::Event::Resized>()) {
+            } else if (auto size = event->getIf<sf::Event::Resized>()) {
                 window.setView(sf::View(sf::FloatRect(
                     {0.f, 0.f},
                     {
@@ -47,7 +49,19 @@ int main(int argc, char* argv[])
                     (size->size.x - videoSize.x * scale) / 2, 
                     (size->size.y - videoSize.y * scale) / 2}
                 );
+            } else if (auto key = event->getIf<sf::Event::KeyPressed>()) {
+                if (key->code == sf::Keyboard::Key::Space) {
+                    player.TogglePause();
+                } else if (key->code == sf::Keyboard::Key::F) {
+                    isFullscreen = !isFullscreen;
+                    window.create(sf::VideoMode({800, 600}), "Moon", sf::Style::Default, (isFullscreen ? sf::State::Fullscreen : sf::State::Windowed));
+                    window.setPosition(lastPosition);
+                }
             }
+        }
+
+        if (!isFullscreen) {
+            lastPosition = window.getPosition();
         }
 
         player.Update();
