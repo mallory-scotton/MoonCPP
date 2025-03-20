@@ -23,7 +23,6 @@ int main(int argc, char* argv[])
 
     sf::RenderWindow window(sf::VideoMode({800, 600}), "Moon", sf::Style::Default);
     sf::Clock clock;
-    // window.setFramerateLimit(60);
 
     if (!ImGui::SFML::Init(window)) {
         std::cerr << "Coudl'nt initialize ImGui" << std::endl;
