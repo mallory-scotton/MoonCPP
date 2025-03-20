@@ -9,6 +9,7 @@
 #include "Core/Config/Config.hpp"
 #include "Core/Media/Media.hpp"
 #include <SFML/Graphics.hpp>
+#include <queue>
 extern "C" {
     #include <libavformat/avformat.h>
     #include <libavcodec/avcodec.h>
@@ -20,6 +21,29 @@ extern "C" {
 ///////////////////////////////////////////////////////////////////////////////
 namespace Moon
 {
+
+///////////////////////////////////////////////////////////////////////////////
+/// \brief Frame structure to hold decoded video frame data
+///
+///////////////////////////////////////////////////////////////////////////////
+struct VideoFrame
+{
+    Uint8* data;
+    Int64 pts;
+    double timestamp;
+    
+    VideoFrame() : data(nullptr), pts(AV_NOPTS_VALUE), timestamp(0.0) {}
+    
+    VideoFrame(Uint8* frameData, Int64 framePts, double frameTimestamp)
+        : data(frameData), pts(framePts), timestamp(frameTimestamp) {}
+        
+    ~VideoFrame() {
+        if (data) {
+            av_free(data);
+            data = nullptr;
+        }
+    }
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 /// \brief
@@ -49,6 +73,16 @@ private:
     ConditionVariable mFrameCV;
     Atomic<bool> mStopDecoding{false};
     Atomic<bool> mNewFrameReady{false};
+
+    static constexpr size_t MAX_QUEUE_SIZE = 30;
+    std::queue<SharedPtr<VideoFrame>> mFrameQueue;
+    Mutex mQueueMutex;
+    ConditionVariable mQueueFullCV;
+    ConditionVariable mQueueEmptyCV;
+    Atomic<double> mCurrentTimestamp{0.0};
+
+    sf::Clock mPlaybackClock;
+    double mLastFrameTime{0.0};
 
 public:
     ///////////////////////////////////////////////////////////////////////////
@@ -156,6 +190,22 @@ public:
     ///
     ///////////////////////////////////////////////////////////////////////////
     sf::Texture& GetCurrentFrameTexture(void) const;
+
+    ///////////////////////////////////////////////////////////////////////////
+    /// \brief Get the current queue size
+    ///
+    /// \return Number of frames in the queue
+    ///
+    ///////////////////////////////////////////////////////////////////////////
+    size_t GetQueueSize(void);
+
+    ///////////////////////////////////////////////////////////////////////////
+    /// \brief Check if video has reached the end
+    ///
+    /// \return True if video has reached the end
+    ///
+    ///////////////////////////////////////////////////////////////////////////
+    bool IsEndOfVideo(void) const;
 };
 
 } // namespace Moon

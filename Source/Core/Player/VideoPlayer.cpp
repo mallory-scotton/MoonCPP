@@ -37,6 +37,8 @@ VideoPlayer::VideoPlayer(const Path& filePath)
     , mVideoStreamIndex(-1)
     , mIsPlaying(false)
     , mPlaybackSpeed(1.0)
+    , mPlaybackClock()
+    , mLastFrameTime((double)mPlaybackClock.getElapsedTime().asSeconds())
 {
     Initialize();
 }
@@ -46,8 +48,19 @@ VideoPlayer::~VideoPlayer()
 {
     mStopDecoding = true;
 
+    mQueueFullCV.notify_all();
+    mQueueEmptyCV.notify_all();
+    mFrameCV.notify_all();
+
     if (mDecodeThread.joinable()) {
         mDecodeThread.join();
+    }
+
+    {
+        std::unique_lock<Mutex> lock(mQueueMutex);
+        while (!mFrameQueue.empty()) {
+            mFrameQueue.pop();
+        }
     }
 
     if (mBuffer) {
@@ -193,55 +206,106 @@ void VideoPlayer::DecodeFrame(void)
 {
     AVRational timeBase =
         mFormatContext->streams[mVideoStreamIndex]->time_base;
-    Int64 lastPts = 0;
+    bool endOfFile = false;
 
     while (!mStopDecoding) {
-        if (av_read_frame(mFormatContext, mPacket) < 0) {
-            mStopDecoding = true;
-            break;
-        }
+        {
+            std::unique_lock<Mutex> lock(mQueueMutex);
+            if (mFrameQueue.size() >= MAX_QUEUE_SIZE && !endOfFile) {
+                mQueueFullCV.wait(lock, [this]{
+                    return (mFrameQueue.size() < MAX_QUEUE_SIZE || mStopDecoding);
+                });
 
-        if (mPacket->stream_index != mVideoStreamIndex) {
-            av_packet_unref(mPacket);
-            continue;
-        }
-
-        if (avcodec_send_packet(mCodecContext, mPacket) < 0) {
-            av_packet_unref(mPacket);
-            continue;
-        }
-
-        int ret = avcodec_receive_frame(mCodecContext, mFrame);
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF || ret < 0) {
-            av_packet_unref(mPacket);
-            continue;
-        }
-
-        Int64 pts = mFrame->pts;
-        if (pts != AV_NOPTS_VALUE && lastPts != AV_NOPTS_VALUE) {
-            Int64 delay = pts - lastPts;
-            if (delay > 0) {
-                int ms = (delay * timeBase.num * 1000) / timeBase.den;
-                std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+                if (mStopDecoding) {
+                    break;
+                }
             }
         }
-        lastPts = pts;
 
-        {
-            std::unique_lock<std::mutex> lock(mFrameMutex);
-            sws_scale(
-                mSwsContext, mFrame->data, mFrame->linesize, 0,
-                mCodecContext->height, mFrameRGB->data, mFrameRGB->linesize
-            );
-
-            mNewFrameReady = true;
-
-            mFrameCV.wait(lock, [this]{
-                return (!mNewFrameReady || mStopDecoding);
-            });
+        if (!mIsPlaying) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
         }
 
-        av_packet_unref(mPacket);
+        int readResult = av_read_frame(mFormatContext, mPacket);
+        if (readResult < 0) {
+            if (readResult == AVERROR_EOF) {
+                endOfFile = true;
+                avcodec_send_packet(mCodecContext, nullptr);
+            } else {
+                break;
+            }
+        }
+
+        if (!endOfFile && mPacket->stream_index != mVideoStreamIndex) {
+            av_packet_unref(mPacket);
+            continue;
+        }
+
+        if (!endOfFile && avcodec_send_packet(mCodecContext, mPacket) < 0) {
+            av_packet_unref(mPacket);
+            continue;
+        }
+
+        while (true) {
+            int ret = avcodec_receive_frame(mCodecContext, mFrame);
+            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+                break;
+            } else if (ret < 0) {
+                mStopDecoding = true;
+                break;
+            }
+
+            double timestamp = 0.0;
+            if (mFrame->pts != AV_NOPTS_VALUE) {
+                timestamp = av_q2d(timeBase) * mFrame->pts;
+            }
+
+            int numBytes = av_image_get_buffer_size(
+                AV_PIX_FMT_RGBA, mCodecContext->width, mCodecContext->height, 1);
+            Uint8* frameBuffer = (Uint8*)av_malloc(numBytes);
+
+            if (!frameBuffer) {
+                continue;
+            }
+
+            AVFrame* tempFrame = av_frame_alloc();
+            av_image_fill_arrays(
+                tempFrame->data, tempFrame->linesize, frameBuffer, AV_PIX_FMT_RGBA,
+                mCodecContext->width, mCodecContext->height, 1
+            );
+
+            sws_scale(
+                mSwsContext, mFrame->data, mFrame->linesize, 0,
+                mCodecContext->height, tempFrame->data, tempFrame->linesize
+            );
+
+            {
+                std::unique_lock<Mutex> lock(mQueueMutex);
+                mFrameQueue.push(std::make_shared<VideoFrame>(
+                    frameBuffer, mFrame->pts, timestamp
+                ));
+                mCurrentTimestamp = timestamp;
+
+                mQueueEmptyCV.notify_one();
+            }
+
+            av_frame_free(&tempFrame);
+
+            if (mPlaybackSpeed != 1.0) {
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(static_cast<int>(10 / mPlaybackSpeed))
+                );
+            }
+        }
+
+        if (!endOfFile) {
+            av_packet_unref(mPacket);
+        }
+
+        if (endOfFile && avcodec_receive_frame(mCodecContext, mFrame) == AVERROR_EOF) {
+            break;
+        }
     }
 }
 
@@ -295,13 +359,7 @@ double VideoPlayer::GetDuration(void) const
 ///////////////////////////////////////////////////////////////////////////////
 double VideoPlayer::GetCurrentTime(void) const
 {
-    if (mFrame && mFrame->pts != AV_NOPTS_VALUE) {
-        return (
-            av_q2d(mFormatContext->streams[mVideoStreamIndex]->time_base) *
-            mFrame->pts
-        );
-    }
-    return (0.0);
+    return (mCurrentTimestamp);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -319,14 +377,38 @@ double VideoPlayer::GetPlaybackSpeed(void) const
 ///////////////////////////////////////////////////////////////////////////////
 void VideoPlayer::Update(void)
 {
-    if (mNewFrameReady) {
-        std::unique_lock<Mutex> lock(mFrameMutex);
-        mTexture.update(mBuffer, {
+    if (!mIsPlaying) {
+        return;
+    }
+
+    SharedPtr<VideoFrame> frame = nullptr;
+
+    {
+        static double frameDuration = 1.0 / av_q2d(
+            mFormatContext->streams[mVideoStreamIndex]->avg_frame_rate
+        );
+
+        if (mPlaybackClock.getElapsedTime().asSeconds() - mLastFrameTime < frameDuration / mPlaybackSpeed) {
+            return;
+        }
+        mLastFrameTime = mPlaybackClock.getElapsedTime().asSeconds();
+
+        std::unique_lock<Mutex> lock(mQueueMutex);
+        if (mFrameQueue.empty()) {
+            return;
+        }
+
+        frame = mFrameQueue.front();
+        mFrameQueue.pop();
+
+        mQueueFullCV.notify_one();
+    }
+
+    if (frame && frame->data) {
+        mTexture.update(frame->data, {
             static_cast<Uint32>(mCodecContext->width),
             static_cast<Uint32>(mCodecContext->height)
         }, {0U, 0U});
-        mNewFrameReady = false;
-        mFrameCV.notify_one();
     }
 }
 
@@ -334,6 +416,19 @@ void VideoPlayer::Update(void)
 sf::Texture& VideoPlayer::GetCurrentFrameTexture(void) const
 {
     return (mTexture);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+size_t VideoPlayer::GetQueueSize(void)
+{
+    std::unique_lock<Mutex> lock(mQueueMutex);
+    return (mFrameQueue.size());
+}
+
+///////////////////////////////////////////////////////////////////////////////
+bool VideoPlayer::IsEndOfVideo(void) const
+{
+    return (mStopDecoding && mFrameQueue.empty());
 }
 
 } // namespace Moon

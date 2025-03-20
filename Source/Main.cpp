@@ -23,7 +23,7 @@ int main(int argc, char* argv[])
 
     sf::RenderWindow window(sf::VideoMode({800, 600}), "Moon", sf::Style::Default);
     sf::Clock clock;
-    window.setFramerateLimit(60);
+    // window.setFramerateLimit(60);
 
     if (!ImGui::SFML::Init(window)) {
         std::cerr << "Coudl'nt initialize ImGui" << std::endl;
@@ -57,7 +57,7 @@ int main(int argc, char* argv[])
 
                 sprite.setScale({scale, scale});
                 sprite.setPosition({
-                    (size->size.x - videoSize.x * scale) / 2, 
+                    (size->size.x - videoSize.x * scale) / 2,
                     (size->size.y - videoSize.y * scale) / 2}
                 );
             } else if (auto key = event->getIf<sf::Event::KeyPressed>()) {
@@ -82,6 +82,32 @@ int main(int argc, char* argv[])
         if (ImGui::Button("Play/Pause")) {
             player.TogglePause();
         }
+
+        // Add playback speed controls
+        float speed = static_cast<float>(player.GetPlaybackSpeed());
+        if (ImGui::SliderFloat("Speed", &speed, 0.25f, 4.0f, "%.2fx")) {
+            player.SetPlaybackSpeed(static_cast<double>(speed));
+        }
+
+        // Add quick preset buttons for playback speed
+        ImGui::Text("Presets:");
+        ImGui::SameLine();
+        if (ImGui::Button("0.5x")) {
+            player.SetPlaybackSpeed(0.5);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("1.0x")) {
+            player.SetPlaybackSpeed(1.0);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("1.5x")) {
+            player.SetPlaybackSpeed(1.5);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("2.0x")) {
+            player.SetPlaybackSpeed(2.0);
+        }
+
         ImGui::Text("%.0f/%.0f", player.GetCurrentTime(), player.GetDuration());
         ImGui::End();
 
